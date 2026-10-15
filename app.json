@@ -1,0 +1,80 @@
+{
+  "expo": {
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#292F9E",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.clipforge.app",
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.ACCESS_MEDIA_LOCATION",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_AUDIO"
+      ],
+      "predictiveBackGestureEnabled": false,
+      "versionCode": 5
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "icon": "./assets/icon.png",
+    "ios": {
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "ClipForge needs microphone access to pick videos with audio.",
+        "NSPhotoLibraryUsageDescription": "ClipForge needs access to your videos so you can add clips to assemble."
+      },
+      "supportsTablet": true
+    },
+    "name": "ClipForge",
+    "orientation": "portrait",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ClipForge needs access to your videos so you can add clips to assemble."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "isAccessMediaLocationEnabled": true,
+          "photosPermission": "ClipForge needs access to your gallery to save the final video.",
+          "savePhotosPermission": "ClipForge needs permission to save the final video to your gallery."
+        }
+      ],
+      "./plugins/withFfmpegKitAar.js",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#1B1B4D",
+          "dark": {
+            "backgroundColor": "#1B1B4D"
+          }
+        }
+      ],
+      "./plugins/withFfmpegKitNativeLink.js"
+    ],
+    "slug": "clipforge-video-app",
+    "userInterfaceStyle": "light",
+    "version": "1.0.4",
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "4e132a58-f3ef-46fa-a199-cb6e8eff7dad"
+      }
+    },
+    "owner": "hasnain7t"
+  }
+}
