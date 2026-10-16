@@ -129,12 +129,15 @@ export async function buildFinal(
       const rc = await session.getReturnCode();
       if (!ReturnCode.isSuccess(rc)) {
         const logs = await session.getAllLogsAsString();
-        // Get the LAST 800 chars (actual error is at the end, not the build config at start).
-        // Skip the version/configuration header.
-        const lines = logs.split('\n');
-        const contentLines = lines.filter((l) => !/configuration:|libavutil|libavcodec|libavformat/i.test(l));
-        const tail = contentLines.slice(-8).join('\n').trim();
-        throw new Error(`Clip ${i + 1} failed to encode. ${tail.slice(0, 500)}`);
+        const failTrace = await session.getFailStackTrace();
+        const state = await session.getState();
+        // Log total length and last 3000 chars to find the actual error.
+        console.error(`[ClipForge] STATE:`, state);
+        console.error(`[ClipForge] FAIL TRACE:`, failTrace || '(empty)');
+        console.error(`[ClipForge] LOG LENGTH:`, logs.length);
+        console.error(`[ClipForge] ENCODE FAILED clip ${i + 1} LOG TAIL:`, logs.slice(-3000));
+        console.error(`[ClipForge] FULL CMD:`, cmd);
+        throw new Error(`Clip ${i + 1} failed to encode. ${logs.slice(-500)}`);
       }
     } finally {
       FFmpegKitConfig.disableStatistics();
@@ -156,6 +159,8 @@ export async function buildFinal(
   );
   const concatRc = await concatSession.getReturnCode();
   if (!RC2.isSuccess(concatRc)) {
+    const concatLogs = await concatSession.getAllLogsAsString();
+    console.error(`[ClipForge] CONCAT FAILED:`, concatLogs.slice(-800));
     throw new Error('Could not join the clips together.');
   }
   if (!finalFile.exists || (finalFile.size ?? 0) < 50000) {

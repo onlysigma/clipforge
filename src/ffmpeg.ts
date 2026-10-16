@@ -2,7 +2,7 @@
  * Pure ffmpeg command builders for ClipForge.
  * These are intentionally side-effect free so they can be unit tested.
  * The filter chains mirror the proven desktop pipeline:
- *   video: scale/pad -> premium grade (unsharp+curves+colorbalance+eq) -> fps/format
+ *   video: scale/pad -> premium grade (unsharp+curves+colorbalance+hue) -> fps/format
  *   audio: highpass -> arnndn (RNNoise) -> afftdn -> loudness normalize
  */
 
@@ -47,10 +47,15 @@ export function buildAudioFilter(opts: BuildOptions): string {
   let af = '';
   if (opts.noiseCancellation) {
     // RNNoise keeps the foreground voice, kills bg voices + hum; afftdn polishes.
-    af += `highpass=f=120,arnndn=m=${opts.modelPath},afftdn=nr=6:nf=-40,`;
+    af += `highpass=f=120,arnndn=m=${toFsPath(opts.modelPath)},afftdn=nr=6:nf=-40,`;
   }
   af += `aresample=44100,aformat=sample_rates=44100:channel_layouts=stereo`;
   return af;
+}
+
+/** Strip file:// prefix — FFmpeg needs plain filesystem paths, not URIs. */
+export function toFsPath(uri: string): string {
+  return uri.startsWith('file://') ? uri.slice(7) : uri;
 }
 
 /**
@@ -82,7 +87,8 @@ export function buildSegmentCommand(
 
   const q = (s: string) => `"${s}"`;
   // NOTE: FFmpegKit.executeAsync() takes arguments WITHOUT the 'ffmpeg' executable prefix.
-  let cmd = `-y -i ${q(clip.uri)} `;
+  // Use plain filesystem paths (not file:// URIs) — FFmpeg can't parse URIs.
+  let cmd = `-y -i ${q(toFsPath(clip.uri))} `;
   let audioMap = '0:a';
   if (!clip.hasAudio) {
     // silent stereo track matching the clip length
@@ -92,21 +98,19 @@ export function buildSegmentCommand(
   cmd +=
     `-vf ${q(vf)} -af ${q(af)} ` +
     `-map 0:v -map ${audioMap} ` +
-    // Per official FFmpeg docs (ffmpeg-codecs.html §9.25): MediaCodec is device-dependent.
-    // Be explicit: CBR bitrate mode is most widely supported; NDK API avoids JVM issues.
-    `-c:v h264_mediacodec -b:v 10M -bitrate_mode cbr -ndk_codec 1 ` +
+    `-c:v h264_mediacodec -b:v 10M ` +
     `-c:a aac -b:a 128k -ar 44100 -ac 2 ` +
-    `-movflags +faststart -shortest ${q(outputUri)}`;
+    `-movflags +faststart -shortest ${q(toFsPath(outputUri))}`;
   return cmd;
 }
 
 /** Concat demuxer command (stream copy — all segments share identical params). */
 export function buildConcatCommand(listFileUri: string, outputUri: string): string {
   // NOTE: no 'ffmpeg' prefix — FFmpegKit.executeAsync() takes raw arguments.
-  return `-y -f concat -safe 0 -i "${listFileUri}" -c copy -movflags +faststart "${outputUri}"`;
+  return `-y -f concat -safe 0 -i "${toFsPath(listFileUri)}" -c copy -movflags +faststart "${toFsPath(outputUri)}"`;
 }
 
 /** Contents of the concat list file. */
 export function buildConcatList(segmentUris: string[]): string {
-  return segmentUris.map((u) => `file '${u.replace(/'/g, "'\\''")}'`).join('\n') + '\n';
+  return segmentUris.map((u) => `file '${toFsPath(u).replace(/'/g, "'\\''")}'`).join('\n') + '\n';
 }
