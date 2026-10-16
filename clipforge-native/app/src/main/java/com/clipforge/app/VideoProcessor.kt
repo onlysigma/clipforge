@@ -7,6 +7,7 @@ import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.effect.Effect
 import androidx.media3.effect.GlEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
@@ -67,7 +68,7 @@ class VideoProcessor(private val context: Context) {
 
         val items = clips.map { uri ->
             // Fresh effect instances per clip — effects may hold per-item state.
-            val videoEffects = mutableListOf<GlEffect>()
+            val videoEffects = mutableListOf<Effect>()
             videoEffects += Presentation.createForWidthAndHeight(
                 options.outWidth,
                 options.outHeight,

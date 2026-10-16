@@ -23,8 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -405,10 +405,10 @@ private fun ClipRow(
                 )
             }
             IconButton(onClick = onUp, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.ArrowUpward, contentDescription = "Move up", tint = Color.White)
+                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up", tint = Color.White)
             }
             IconButton(onClick = onDown, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.ArrowDownward, contentDescription = "Move down", tint = Color.White)
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down", tint = Color.White)
             }
             IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = Color.White)
