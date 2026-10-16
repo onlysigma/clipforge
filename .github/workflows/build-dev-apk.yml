@@ -1,0 +1,54 @@
+name: Build Dev APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0" 2>&1 | tail -3 || true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Fix ffmpeg-kit package
+        run: node scripts/fix-ffmpeg-kit.js
+
+      - name: Expo prebuild
+        run: npx expo prebuild --platform android --non-interactive
+
+      - name: Build Debug APK (dev client)
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon -x lint
+        env:
+          GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=false"
+
+      - name: Upload Dev APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipforge-dev-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          retention-days: 30
