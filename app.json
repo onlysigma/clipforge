@@ -63,7 +63,8 @@
         }
       ],
       "./plugins/withFfmpegKitNativeLink.js",
-      "./plugins/withSmartExceptionFix.js"
+      "./plugins/withSmartExceptionFix.js",
+      "./plugins/withOldArchitecture.js"
     ],
     "slug": "clipforge-video-app",
     "userInterfaceStyle": "light",
