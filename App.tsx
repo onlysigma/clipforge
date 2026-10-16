@@ -71,7 +71,7 @@ export default function App() {
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
+        mediaTypes: ['videos'],
         allowsMultipleSelection: true,
         quality: 1,
       });
