@@ -85,8 +85,9 @@ class VideoProcessor(private val context: Context) {
                 .build()
         }
 
+        @Suppress("DEPRECATION")
         val sequence = EditedMediaItemSequence.Builder(items).build()
-        val composition = Composition.Builder(sequence).build()
+        val composition = Composition.Builder(listOf(sequence)).build()
 
         val t = Transformer.Builder(context)
             .setVideoMimeType(MimeTypes.VIDEO_H264)
