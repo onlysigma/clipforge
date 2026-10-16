@@ -26,12 +26,12 @@ export function outputSize(orientation: 'landscape' | 'portrait'): [number, numb
   return orientation === 'landscape' ? [1920, 1080] : [1080, 1920];
 }
 
-/** Premium "CapCut-style" food grade. */
+/** Premium "CapCut-style" food grade. NOTE: 'eq' filter not in this FFmpeg build — use hue for saturation. */
 export const PREMIUM_GRADE =
   "unsharp=5:5:1.0:5:5:0.0," +
   "curves=all='0/0 0.5/0.56 1/1'," +
   "colorbalance=rs=0.08:gs=0.02:bs=-0.06:rm=0.05:gm=0.01:bm=-0.04," +
-  "eq=saturation=1.28:contrast=1.06";
+  "hue=s=1.28";
 
 export function buildVideoFilter(opts: BuildOptions): string {
   const [w, h] = outputSize(opts.orientation);

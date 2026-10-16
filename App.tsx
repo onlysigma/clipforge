@@ -17,6 +17,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import * as ImagePicker from 'expo-image-picker';
 import { Asset as MediaAsset, requestPermissionsAsync as requestMediaPermissions } from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import {
   ClipInfo,
   BuildOptions,
@@ -26,6 +27,9 @@ import {
   cancelBuild,
   ProgressEvent,
 } from './src/pipeline';
+
+/** ClipInfo plus a local thumbnail URI for the scene list preview. */
+type Clip = ClipInfo & { thumbnail?: string };
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -41,7 +45,7 @@ const MUTED = '#9A9AB5';
 const LOGO = require('./assets/splash-icon.png');
 
 export default function App() {
-  const [clips, setClips] = useState<ClipInfo[]>([]);
+  const [clips, setClips] = useState<Clip[]>([]);
   const [noiseCancellation, setNoiseCancellation] = useState(true);
   const [premiumFilter, setPremiumFilter] = useState(true);
   const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('landscape');
@@ -77,10 +81,21 @@ export default function App() {
       });
       if (result.canceled) return;
       setBusy(true);
-      const fresh: ClipInfo[] = [];
+      const fresh: Clip[] = [];
       for (const asset of result.assets) {
         try {
-          fresh.push(await probeClip(asset.uri));
+          const info = await probeClip(asset.uri);
+          // Generate a small thumbnail for the scene list preview.
+          let thumbnail: string | undefined;
+          try {
+            const { uri } = await VideoThumbnails.getThumbnailAsync(asset.uri, {
+              time: Math.min(1000, (info.duration * 1000) / 2),
+            });
+            thumbnail = uri;
+          } catch {
+            // Thumbnail is optional — clip still works without it.
+          }
+          fresh.push({ ...info, thumbnail });
         } catch (e) {
           Alert.alert(
             'Unreadable clip',
@@ -145,7 +160,10 @@ export default function App() {
         setStatusText('Cancelled.');
       } else {
         setPhase('error');
-        setStatusText(e instanceof Error ? e.message : 'Build failed.');
+        // Show a clean error message — trim verbose FFmpeg logs to the key line.
+        const rawMsg = e instanceof Error ? e.message : 'Build failed.';
+        const keyLine = rawMsg.split('\n').find((l) => /no such filter|error|failed/i.test(l)) || rawMsg.split('\n')[0];
+        setStatusText(keyLine.trim().slice(0, 200));
       }
     }
   }, [clips, noiseCancellation, premiumFilter, orientation]);
@@ -186,11 +204,15 @@ export default function App() {
   const totalDuration = clips.reduce((s, c) => s + c.duration, 0);
   const building = phase === 'preparing' || phase === 'building';
 
-  const renderClip = ({ item, index }: { item: ClipInfo; index: number }) => (
+  const renderClip = ({ item, index }: { item: Clip; index: number }) => (
     <View style={styles.clipRow}>
-      <View style={styles.clipBadge}>
-        <Text style={styles.clipBadgeText}>{index + 1}</Text>
-      </View>
+      {item.thumbnail ? (
+        <Image source={{ uri: item.thumbnail }} style={styles.clipThumb} />
+      ) : (
+        <View style={styles.clipBadge}>
+          <Text style={styles.clipBadgeText}>{index + 1}</Text>
+        </View>
+      )}
       <View style={styles.clipInfo}>
         <Text style={styles.clipTitle}>Scene {index + 1}</Text>
         <Text style={styles.clipSub}>
@@ -366,7 +388,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
-  scroll: { padding: 16 },
+  scroll: { padding: 16, paddingTop: 24 },
   header: { flexDirection: 'row', alignItems: 'center', marginBottom: 18, marginTop: 4 },
   logo: { width: 52, height: 52, borderRadius: 14, marginRight: 12 },
   title: { fontSize: 26, fontWeight: '800', color: TEXT, letterSpacing: 0.5 },
@@ -409,6 +431,13 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   clipBadgeText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  clipThumb: {
+    width: 56,
+    height: 40,
+    borderRadius: 8,
+    marginRight: 10,
+    backgroundColor: '#2A2A45',
+  },
   clipInfo: { flex: 1 },
   clipTitle: { color: TEXT, fontSize: 14, fontWeight: '700' },
   clipSub: { color: MUTED, fontSize: 11, marginTop: 2 },
