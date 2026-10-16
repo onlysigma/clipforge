@@ -67,7 +67,9 @@ export async function probeClip(uri: string): Promise<ClipInfo> {
   const session = await FFprobeKit.getMediaInformation(uri);
   const info = session.getMediaInformation();
   if (!info) throw new Error('Could not read this video file.');
-  const duration = info.getDuration() ?? 0;
+  // NOTE: getDuration() is typed as number but ACTUALLY returns a string at runtime
+  // (library type definition bug). Must parse to number or .toFixed() crashes.
+  const duration = parseFloat(String(info.getDuration() ?? '0'));
   if (!duration || duration <= 0) throw new Error('Could not read video duration.');
   const streams = info.getStreams() ?? [];
   const video = streams.find((s) => s.getType() === 'video');
