@@ -15,9 +15,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -28,6 +31,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -101,8 +105,15 @@ fun ClipForgeScreen(vm: ClipForgeViewModel) {
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .navigationBarsPadding()
             .padding(16.dp)
     ) {
+        // ---- Scrollable content ----
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+        ) {
         // ---- Header ----
         Text("ClipForge", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
         Text(
@@ -237,6 +248,11 @@ fun ClipForgeScreen(vm: ClipForgeViewModel) {
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f)
                     )
+                    TextButton(onClick = { downloadFile(context, file) }) {
+                        Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Save", color = Color.White)
+                    }
                     TextButton(onClick = { shareFile(context, file) }) {
                         Icon(Icons.Filled.Share, contentDescription = null, tint = Color.White)
                         Spacer(Modifier.width(4.dp))
@@ -265,8 +281,11 @@ fun ClipForgeScreen(vm: ClipForgeViewModel) {
             ) { Text("Cancel") }
             Spacer(Modifier.height(8.dp))
         }
+        } // end scrollable content
 
-        // ---- Build button ----
+        Spacer(Modifier.height(8.dp))
+
+        // ---- Build button (fixed at bottom) ----
         Button(
             onClick = vm::build,
             enabled = ui.clips.isNotEmpty() && !ui.isBuilding,
@@ -429,4 +448,40 @@ private fun shareFile(context: android.content.Context, file: File) {
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(intent, "Share video"))
+}
+
+private fun downloadFile(context: android.content.Context, file: File) {
+    try {
+        val contentValues = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+            put(
+                android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                android.os.Environment.DIRECTORY_DOWNLOADS + "/ClipForge"
+            )
+        }
+        val resolver = context.contentResolver
+        val uri = resolver.insert(
+            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            contentValues
+        )
+        if (uri != null) {
+            resolver.openOutputStream(uri)?.use { out ->
+                file.inputStream().use { input ->
+                    input.copyTo(out)
+                }
+            }
+            android.widget.Toast.makeText(
+                context,
+                "Saved to Downloads/ClipForge",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(
+            context,
+            "Save failed: ${e.message}",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+    }
 }

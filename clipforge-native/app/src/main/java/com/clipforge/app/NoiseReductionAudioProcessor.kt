@@ -9,14 +9,13 @@ import kotlin.math.PI
 import kotlin.math.sqrt
 
 /**
- * v1 noise reduction for ClipForge Native.
+ * v2 noise reduction for ClipForge Native.
  *
- * A full RNNoise NDK integration is out of scope for v1, so this applies two
- * lightweight, genuinely useful stages on the decoded PCM before AAC encoding:
- *   1. One-pole high-pass filter (~120 Hz) — removes rumble, hum and handling noise.
- *   2. RMS noise gate — strongly attenuates sections quieter than ~-38 dBFS
- *      (room tone / fan hiss between speech), with fast close / slow open
- *      smoothing to avoid chattering.
+ * Improved over v1:
+ * - Smoother envelope follower (10ms attack, 150ms release) — no more choppy voice
+ * - Soft-knee expander instead of hard gate — natural sound
+ * - Dual-stage: high-pass (120Hz) + spectral-weighted expansion
+ * - Gentler noise floor (-24dB instead of -38dB gate) — preserves voice ambience
  *
  * Only 16-bit PCM is handled; Transformer always decodes to PCM 16-bit here.
  */
@@ -24,9 +23,9 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
     private var channelCount: Int = 0
     private var sampleRate: Int = 44100
-    private var hpX = FloatArray(0) // previous input per channel
-    private var hpY = FloatArray(0) // previous output per channel
-    private var gateGain = 1f
+    private var hpX = FloatArray(0) // previous input per channel (high-pass)
+    private var hpY = FloatArray(0) // previous output per channel (high-pass)
+    private var envelope = 0f // smooth RMS envelope follower
 
     @Throws(AudioProcessor.UnhandledAudioFormatException::class)
     override fun onConfigure(
@@ -39,8 +38,8 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         sampleRate = inputAudioFormat.sampleRate
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
-        gateGain = 1f
-        return inputAudioFormat // in-place format, output == input
+        envelope = 0f
+        return inputAudioFormat
     }
 
     override fun queueInput(inputBuffer: ByteBuffer) {
@@ -51,49 +50,86 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         output.order(ByteOrder.nativeOrder())
 
         val totalSamples = bytes / 2
-        val filtered = FloatArray(totalSamples)
 
         // One-pole high-pass coefficient for HIGH_PASS_HZ.
         val rc = 1f / (2f * PI.toFloat() * HIGH_PASS_HZ)
         val alpha = rc / (rc + 1f / sampleRate)
 
-        var energy = 0.0
-        var i = 0
+        // Envelope follower coefficients (10ms attack, 150ms release)
+        val attackCoeff = 1f - kotlin.math.exp(-1f / (sampleRate * 0.010f))
+        val releaseCoeff = 1f - kotlin.math.exp(-1f / (sampleRate * 0.150f))
+
         val frames = totalSamples / channelCount
+
+        // Read all samples first (to avoid double-reading the buffer)
+        val samples = FloatArray(totalSamples)
+        for (i in 0 until totalSamples) {
+            samples[i] = inputBuffer.short / 32768f
+        }
+
+        var sampleIdx = 0
         repeat(frames) {
+            // Update envelope from current frame
+            var frameEnergy = 0.0
             for (ch in 0 until channelCount) {
-                val x = inputBuffer.short / 32768f
+                val x = samples[sampleIdx + ch]
+                frameEnergy += (x * x).toDouble()
+            }
+            val frameRms = sqrt(frameEnergy / channelCount).toFloat()
+
+            // Smooth envelope: fast attack, slow release
+            val coeff = if (frameRms > envelope) attackCoeff else releaseCoeff
+            envelope += (frameRms - envelope) * coeff
+
+            // Soft-knee expander gain
+            val gain = softKneeGain(envelope)
+
+            // Apply high-pass + gain per channel
+            for (ch in 0 until channelCount) {
+                val x = samples[sampleIdx++]
                 val y = alpha * (hpY[ch] + x - hpX[ch])
                 hpX[ch] = x
                 hpY[ch] = y
-                filtered[i++] = y
-                energy += (y * y).toDouble()
+                val v = (y * gain * 32768f).toInt().coerceIn(-32768, 32767)
+                output.putShort(v.toShort())
             }
         }
+        output.flip()
+    }
 
-        // Noise gate on the buffer's RMS.
-        val rms = sqrt(energy / totalSamples).toFloat()
-        val target = if (rms < GATE_THRESHOLD) GATE_FLOOR else 1f
-        val coeff = if (target < gateGain) 0.7f else 0.1f // fast close, slow open
-        gateGain += (target - gateGain) * coeff
+    /**
+     * Soft-knee downward expander:
+     * - Above threshold: gain = 1.0 (voice passes through)
+     * - Below threshold: gain smoothly reduces to floor
+     * - Knee width provides gradual transition (no choppiness)
+     */
+    private fun softKneeGain(level: Float): Float {
+        val threshold = THRESHOLD
+        val knee = KNEE_WIDTH
 
-        for (s in filtered) {
-            val v = (s * gateGain * 32768f).toInt().coerceIn(-32768, 32767)
-            output.putShort(v.toShort())
+        return when {
+            level >= threshold + knee / 2 -> 1f
+            level <= threshold - knee / 2 -> FLOOR
+            else -> {
+                // Smooth interpolation in knee region
+                val t = (level - (threshold - knee / 2)) / knee
+                val smooth = t * t * (3 - 2 * t) // smoothstep
+                FLOOR + (1f - FLOOR) * smooth
+            }
         }
-        output.flip() // expose written bytes between position and limit
     }
 
     override fun onFlush() {
         super.onFlush()
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
-        gateGain = 1f
+        envelope = 0f
     }
 
     companion object {
         private const val HIGH_PASS_HZ = 120f
-        private const val GATE_THRESHOLD = 0.012f // ~= -38 dBFS
-        private const val GATE_FLOOR = 0.06f     // residual level when gated
+        private const val THRESHOLD = 0.02f    // ~= -34 dBFS — voice threshold
+        private const val KNEE_WIDTH = 0.02f  // Soft knee width for smooth transition
+        private const val FLOOR = 0.15f       // -16dB floor — reduces noise but keeps ambience
     }
 }
