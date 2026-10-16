@@ -85,12 +85,7 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
     }
 
     override fun onFlush() {
-        // Deprecated no-arg version — delegate to the new API for safety.
-        onFlush(AudioProcessor.StreamMetadata.DEFAULT)
-    }
-
-    override fun onFlush(streamMetadata: AudioProcessor.StreamMetadata) {
-        super.onFlush(streamMetadata)
+        super.onFlush()
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
         gateGain = 1f

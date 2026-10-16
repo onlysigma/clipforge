@@ -4,7 +4,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
@@ -86,10 +85,8 @@ class VideoProcessor(private val context: Context) {
                 .build()
         }
 
-        val sequence = EditedMediaItemSequence.Builder(
-            setOf(C.TRACK_TYPE_VIDEO, C.TRACK_TYPE_AUDIO)
-        ).addItems(items).build()
-        val composition = Composition.Builder(listOf(sequence)).build()
+        val sequence = EditedMediaItemSequence.Builder(items).build()
+        val composition = Composition.Builder(sequence).build()
 
         val t = Transformer.Builder(context)
             .setVideoMimeType(MimeTypes.VIDEO_H264)
