@@ -7,7 +7,7 @@ import android.os.Looper
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.effect.Effect
+import androidx.media3.common.Effect
 import androidx.media3.effect.GlEffect
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
