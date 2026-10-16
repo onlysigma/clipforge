@@ -30,8 +30,8 @@ export function outputSize(orientation: 'landscape' | 'portrait'): [number, numb
 export const PREMIUM_GRADE =
   "unsharp=5:5:1.0:5:5:0.0," +
   "curves=all='0/0 0.5/0.56 1/1'," +
-  ",colorbalance=rs=0.08:gs=0.02:bs=-0.06:rm=0.05:gm=0.01:bm=-0.04" +
-  ",eq=saturation=1.28:contrast=1.06";
+  "colorbalance=rs=0.08:gs=0.02:bs=-0.06:rm=0.05:gm=0.01:bm=-0.04," +
+  "eq=saturation=1.28:contrast=1.06";
 
 export function buildVideoFilter(opts: BuildOptions): string {
   const [w, h] = outputSize(opts.orientation);
@@ -81,7 +81,8 @@ export function buildSegmentCommand(
   }
 
   const q = (s: string) => `"${s}"`;
-  let cmd = `ffmpeg -y -i ${q(clip.uri)} `;
+  // NOTE: FFmpegKit.executeAsync() takes arguments WITHOUT the 'ffmpeg' executable prefix.
+  let cmd = `-y -i ${q(clip.uri)} `;
   let audioMap = '0:a';
   if (!clip.hasAudio) {
     // silent stereo track matching the clip length
@@ -91,7 +92,7 @@ export function buildSegmentCommand(
   cmd +=
     `-vf ${q(vf)} -af ${q(af)} ` +
     `-map 0:v -map ${audioMap} ` +
-    `-c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p ` +
+    `-c:v h264_mediacodec -b:v 10M -pix_fmt yuv420p ` +
     `-c:a aac -b:a 128k -ar 44100 -ac 2 ` +
     `-movflags +faststart -shortest ${q(outputUri)}`;
   return cmd;
@@ -99,7 +100,8 @@ export function buildSegmentCommand(
 
 /** Concat demuxer command (stream copy — all segments share identical params). */
 export function buildConcatCommand(listFileUri: string, outputUri: string): string {
-  return `ffmpeg -y -f concat -safe 0 -i "${listFileUri}" -c copy -movflags +faststart "${outputUri}"`;
+  // NOTE: no 'ffmpeg' prefix — FFmpegKit.executeAsync() takes raw arguments.
+  return `-y -f concat -safe 0 -i "${listFileUri}" -c copy -movflags +faststart "${outputUri}"`;
 }
 
 /** Contents of the concat list file. */
