@@ -92,7 +92,9 @@ export function buildSegmentCommand(
   cmd +=
     `-vf ${q(vf)} -af ${q(af)} ` +
     `-map 0:v -map ${audioMap} ` +
-    `-c:v h264_mediacodec -b:v 10M -pix_fmt yuv420p ` +
+    // NOTE: filter chain already ends with format=yuv420p — do NOT pass -pix_fmt
+    // again (conflicts with h264_mediacodec on some devices). 8M is safer than 10M.
+    `-c:v h264_mediacodec -b:v 8M ` +
     `-c:a aac -b:a 128k -ar 44100 -ac 2 ` +
     `-movflags +faststart -shortest ${q(outputUri)}`;
   return cmd;

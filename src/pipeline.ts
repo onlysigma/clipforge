@@ -129,7 +129,10 @@ export async function buildFinal(
       const rc = await session.getReturnCode();
       if (!ReturnCode.isSuccess(rc)) {
         const logs = await session.getAllLogsAsString();
-        throw new Error(`Clip ${i + 1} failed to encode (${String(rc)}). ${logs.slice(-300)}`);
+        // Extract the most relevant error lines for a readable message.
+        const errLines = logs.split('\n').filter((l) => /error|failed|no such|invalid|cannot|unable/i.test(l));
+        const keyErr = (errLines.slice(-3).join(' | ') || logs.slice(-500)).trim();
+        throw new Error(`Clip ${i + 1} failed to encode. ${keyErr.slice(0, 400)}`);
       }
     } finally {
       FFmpegKitConfig.disableStatistics();
