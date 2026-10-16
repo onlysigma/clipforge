@@ -129,10 +129,12 @@ export async function buildFinal(
       const rc = await session.getReturnCode();
       if (!ReturnCode.isSuccess(rc)) {
         const logs = await session.getAllLogsAsString();
-        // Extract the most relevant error lines for a readable message.
-        const errLines = logs.split('\n').filter((l) => /error|failed|no such|invalid|cannot|unable/i.test(l));
-        const keyErr = (errLines.slice(-3).join(' | ') || logs.slice(-500)).trim();
-        throw new Error(`Clip ${i + 1} failed to encode. ${keyErr.slice(0, 400)}`);
+        // Get the LAST 800 chars (actual error is at the end, not the build config at start).
+        // Skip the version/configuration header.
+        const lines = logs.split('\n');
+        const contentLines = lines.filter((l) => !/configuration:|libavutil|libavcodec|libavformat/i.test(l));
+        const tail = contentLines.slice(-8).join('\n').trim();
+        throw new Error(`Clip ${i + 1} failed to encode. ${tail.slice(0, 500)}`);
       }
     } finally {
       FFmpegKitConfig.disableStatistics();
