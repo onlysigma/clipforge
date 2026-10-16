@@ -80,7 +80,10 @@ export default function App() {
       const fresh: ClipInfo[] = [];
       for (const asset of result.assets) {
         try {
-          fresh.push(await probeClip(asset.uri));
+          // DIAGNOSTIC: bypass probeClip to isolate crash source
+          const uri = asset.uri;
+          const name = uri.split('/').pop() || 'video.mp4';
+          fresh.push({ uri, name, width: 1920, height: 1080, duration: 10, size: 0 });
         } catch (e) {
           Alert.alert(
             'Unreadable clip',
