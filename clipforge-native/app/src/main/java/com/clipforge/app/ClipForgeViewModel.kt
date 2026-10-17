@@ -112,7 +112,12 @@ class ClipForgeViewModel(app: Application) : AndroidViewModel(app) {
     fun build() {
         val state = _ui.value
         if (state.clips.isEmpty() || state.isBuilding) return
-        val (w, h) = outputSize(state.aspectRatio, state.resolution)
+        startBuild(state.resolution, isRetry = false)
+    }
+
+    private fun startBuild(resolution: Resolution, isRetry: Boolean) {
+        val state = _ui.value
+        val (w, h) = outputSize(state.aspectRatio, resolution)
         val movies = getApplication<Application>()
             .getExternalFilesDir(Environment.DIRECTORY_MOVIES)
         val out = File(movies, "clipforge_${System.currentTimeMillis()}.mp4")
@@ -143,10 +148,25 @@ class ClipForgeViewModel(app: Application) : AndroidViewModel(app) {
                     }
 
                     override fun onError(e: Exception) {
-                        val msg = e.message?.takeIf { it.isNotBlank() }
-                            ?: e.cause?.message?.takeIf { it.isNotBlank() }
-                            ?: e.toString()
-                        _ui.update { it.copy(isBuilding = false, error = msg) }
+                        // Auto-fallback: if the hardware encoder chokes (e.g. Unisoc
+                        // on long multi-clip builds), retry once at 720p which
+                        // every encoder supports.
+                        val msg = e.message ?: e.toString()
+                        val isCodecError = msg.contains("Codec", ignoreCase = true) ||
+                                msg.contains("encoder", ignoreCase = true) ||
+                                msg.contains("MediaCodec", ignoreCase = true)
+                        if (isCodecError && !isRetry && resolution == Resolution.P1080) {
+                            startBuild(Resolution.P720, isRetry = true)
+                            return
+                        }
+                        val displayMsg = if (isRetry) {
+                            "Encoder failed even at 720p. Try fewer clips.\n\n$msg"
+                        } else {
+                            msg.takeIf { it.isNotBlank() }
+                                ?: e.cause?.message?.takeIf { it.isNotBlank() }
+                                ?: e.toString()
+                        }
+                        _ui.update { it.copy(isBuilding = false, error = displayMsg) }
                     }
                 }
             )
