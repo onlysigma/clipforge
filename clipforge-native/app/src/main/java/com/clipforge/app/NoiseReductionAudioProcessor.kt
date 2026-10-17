@@ -34,6 +34,7 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
     private var fftOverlap = Array(0) { FloatArray(0) }
     private var fftInputBuf = Array(0) { FloatArray(0) }
     private var fftInputPos = IntArray(0)
+    private var profileInitialized = BooleanArray(0)
 
     // High-pass filter state
     private var hpX = FloatArray(0)
@@ -69,6 +70,8 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         fftOverlap = Array(channelCount) { FloatArray(FFT_SIZE / 2) }
         fftInputBuf = Array(channelCount) { FloatArray(FFT_SIZE * 2) }
         fftInputPos = IntArray(channelCount)
+        profileInitialized = BooleanArray(channelCount)
+        profileInitialized = BooleanArray(channelCount)
 
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
@@ -181,20 +184,27 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         // --- Continuous minimum-statistics noise profile tracking ---
         // Fast attack down (0.3), very slow release up (0.001).
         // Converges to stationary noise floor even during continuous audio.
+        // Profile initialized from first frame for fast startup.
         for (i in 0 until bins) {
             val power = real[i] * real[i] + imag[i] * imag[i]
-            val prof = noiseProfile[ch][i]
-            noiseProfile[ch][i] = if (power < prof) {
-                0.7f * prof + 0.3f * power
+            if (!profileInitialized[ch]) {
+                noiseProfile[ch][i] = power.coerceAtLeast(1e-8f)
             } else {
-                0.999f * prof + 0.001f * power
+                val prof = noiseProfile[ch][i]
+                noiseProfile[ch][i] = if (power < prof) {
+                    0.7f * prof + 0.3f * power
+                } else {
+                    0.999f * prof + 0.001f * power
+                }
             }
         }
+        profileInitialized[ch] = true
 
         // --- Spectral gating: attenuate bins near/below noise floor ---
-        // 15dB max reduction, smooth transition to preserve voice/activity
-        val maxReductionDb = 15f
-        val minGain = 10f.pow(-maxReductionDb / 20f) // ~0.178
+        // 20dB max reduction, smooth transition to preserve voice/activity.
+        // Thresholds tuned on real user audio: SNR<4 = noise, 4-10 = transition.
+        val maxReductionDb = 20f
+        val minGain = 10f.pow(-maxReductionDb / 20f) // ~0.1
 
         for (i in 0 until bins) {
             val power = real[i] * real[i] + imag[i] * imag[i]
@@ -202,9 +212,9 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
             val snr = power / noisePower
 
             val gain = when {
-                snr < 1.5f -> minGain                    // clearly noise
-                snr < 6f -> {                            // transition zone
-                    val t = (snr - 1.5f) / 4.5f
+                snr < 4f -> minGain                      // clearly noise
+                snr < 10f -> {                            // transition zone
+                    val t = (snr - 4f) / 6f
                     val smooth = t * t * (3 - 2 * t)      // smoothstep
                     minGain + smooth * (1f - minGain)
                 }
@@ -294,6 +304,7 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         fftOverlap = Array(channelCount) { FloatArray(FFT_SIZE / 2) }
         fftInputBuf = Array(channelCount) { FloatArray(FFT_SIZE * 2) }
         fftInputPos = IntArray(channelCount)
+        profileInitialized = BooleanArray(channelCount)
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
     }
