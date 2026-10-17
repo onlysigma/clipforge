@@ -138,10 +138,4 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         hpY = FloatArray(channelCount)
         envelope = FloatArray(channelCount)
     }
-
-    override fun onRelease() {
-        super.onRelease()
-        denoiser?.release()
-        denoiser = null
-    }
 }
