@@ -13,6 +13,23 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0-native"
+
+        // RNNoise native library via CMake/NDK
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c99"
+            }
+        }
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.18.1"
+        }
     }
 
     buildTypes {
