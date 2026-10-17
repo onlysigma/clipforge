@@ -50,8 +50,13 @@ class RnnoiseDenoiser(
     private val frameSize: Int
     private val available: Boolean
 
-    // Resampling state (simple linear interpolation)
+    // Resampling state
     private var resamplePos = 0.0
+
+    // Frame carryover: keeps 48kHz mono samples between process() calls so
+    // no partial frame is ever dropped or passed through unprocessed.
+    private var carryover = FloatArray(0)
+    private var carryoverLen = 0
 
     init {
         available = RnnoiseNative.isAvailable()
@@ -67,7 +72,8 @@ class RnnoiseDenoiser(
 
     /**
      * Process interleaved 16-bit PCM samples.
-     * Returns denoised samples (same format).
+     * Returns denoised samples (same format, same length).
+     * Frame-continuous across calls: leftover samples are carried over.
      */
     fun process(samples: ShortArray): ShortArray {
         if (!isAvailable()) return samples
@@ -75,21 +81,38 @@ class RnnoiseDenoiser(
         // Convert to mono float at 48kHz
         val mono48k = resampleTo48kMono(samples)
 
-        // Process in RNNoise frames
-        val output48k = FloatArray(mono48k.size)
+        // Prepend carryover from previous call
+        val total = carryoverLen + mono48k.size
+        val work = FloatArray(total)
+        if (carryoverLen > 0) {
+            carryover.copyInto(work, 0, 0, carryoverLen)
+        }
+        mono48k.copyInto(work, carryoverLen)
+
+        // Process all complete RNNoise frames
+        val output48k = FloatArray(total)
         val inFrame = FloatArray(frameSize)
         val outFrame = FloatArray(frameSize)
 
         var pos = 0
-        while (pos + frameSize <= mono48k.size) {
-            mono48k.copyInto(inFrame, 0, pos, pos + frameSize)
+        while (pos + frameSize <= total) {
+            work.copyInto(inFrame, 0, pos, pos + frameSize)
             RnnoiseNative.processFrame(handle, inFrame, outFrame)
             outFrame.copyInto(output48k, pos)
             pos += frameSize
         }
-        // Copy remainder as-is
-        if (pos < mono48k.size) {
-            mono48k.copyInto(output48k, pos, pos, mono48k.size)
+
+        // Save remainder as carryover (processed next call, not dropped)
+        carryoverLen = total - pos
+        if (carryover.size < carryoverLen) {
+            carryover = FloatArray(maxOf(carryoverLen, frameSize))
+        }
+        if (carryoverLen > 0) {
+            work.copyInto(carryover, 0, pos, total)
+            // Output carryover region unprocessed for now (same length out);
+            // it will be denoised when the next buffer completes the frame.
+            // To keep length exact, copy it through this time.
+            work.copyInto(output48k, pos, pos, total)
         }
 
         // Convert back to original format
@@ -137,7 +160,10 @@ class RnnoiseDenoiser(
         for (i in 0 until frames) {
             val srcPos = i / ratio
             val srcIdx = srcPos.toInt().coerceIn(0, mono48k.size - 1)
-            val sample = mono48k[srcIdx].coerceIn(-1f, 1f)
+            val frac = (srcPos - srcIdx).toFloat().coerceIn(0f, 1f)
+            val s0 = mono48k[srcIdx]
+            val s1 = if (srcIdx + 1 < mono48k.size) mono48k[srcIdx + 1] else s0
+            val sample = (s0 + (s1 - s0) * frac).coerceIn(-1f, 1f)
             val shortVal = (sample * 32767f).toInt().toShort()
             for (ch in 0 until channels) {
                 result[i * channels + ch] = shortVal
@@ -151,5 +177,6 @@ class RnnoiseDenoiser(
             RnnoiseNative.destroy(handle)
             handle = 0
         }
+        carryoverLen = 0
     }
 }

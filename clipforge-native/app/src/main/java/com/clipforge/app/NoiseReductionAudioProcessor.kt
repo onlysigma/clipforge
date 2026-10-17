@@ -8,15 +8,18 @@ import java.nio.ByteOrder
 import kotlin.math.*
 
 /**
- * ClipForge noise reduction — FINAL two-stage edition (v6).
+ * ClipForge noise reduction — v7 FINAL.
  *
- * Replicates the old FFmpeg pipeline: highpass 120Hz → arnndn (RNNoise) → afftdn
+ * Two-stage pipeline (mirrors old FFmpeg: highpass → arnndn → afftdn):
  *
- * Stage 1: RNNoise AI (via NDK) — removes background noise intelligently
- * Stage 2: FFT spectral denoiser (afftdn-style, 12dB) — removes residual stationary noise
+ * Stage 1: RNNoise AI (via NDK) — speech-focused neural suppression.
+ * Stage 2: FFT spectral denoiser with CONTINUOUS minimum-statistics noise
+ *          tracking — removes stationary bg noise (fan/hum/hiss/room tone)
+ *          whether or not speech is present. This is what afftdn did.
  *
- * The v5 only had Stage 1, which is why only ~20% noise was removed.
- * This adds the missing Stage 2 for the full effect.
+ * v6 bug fixed: stage-2 only learned a noise profile during quiet frames in
+ * the first 50 frames — with continuous audio it learned nothing and did
+ * nothing. Now the profile tracks continuously.
  */
 class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
@@ -31,7 +34,6 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
     private var fftOverlap = Array(0) { FloatArray(0) }
     private var fftInputBuf = Array(0) { FloatArray(0) }
     private var fftInputPos = IntArray(0)
-    private var profiledFrames = 0
 
     // High-pass filter state
     private var hpX = FloatArray(0)
@@ -63,11 +65,10 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
         // Stage 2: FFT denoiser state
         val bins = FFT_SIZE / 2 + 1
-        noiseProfile = Array(channelCount) { FloatArray(bins) { 1e-10f } }
+        noiseProfile = Array(channelCount) { FloatArray(bins) { 1e-8f } }
         fftOverlap = Array(channelCount) { FloatArray(FFT_SIZE / 2) }
         fftInputBuf = Array(channelCount) { FloatArray(FFT_SIZE * 2) }
         fftInputPos = IntArray(channelCount)
-        profiledFrames = 0
 
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
@@ -100,7 +101,7 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
             samples
         }
 
-        // Stage 2: FFT spectral denoising (afftdn-style)
+        // Stage 2: FFT spectral denoising (stationary noise removal)
         val stage2Out = fftDenoise(stage1Out)
 
         val output = replaceOutputBuffer(bytes)
@@ -112,8 +113,13 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
     }
 
     /**
-     * Stage 2: FFT-based spectral denoiser (like FFmpeg afftdn, nr=12dB).
-     * Correct overlap-add implementation (no scaling bug).
+     * Stage 2: FFT-based spectral denoiser with continuous minimum-statistics
+     * noise tracking (afftdn-style, 15dB max reduction).
+     *
+     * Unlike v6 (which only learned during quiet frames), the noise profile
+     * now tracks continuously: fast attack when bin power drops below the
+     * profile, very slow release when above. This converges to the stationary
+     * noise floor even during continuous speech/activity.
      */
     private fun fftDenoise(samples: ShortArray): ShortArray {
         val totalSamples = samples.size
@@ -134,14 +140,13 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
             while (fftInputPos[ch] >= FFT_SIZE) {
                 val frameOut = processFftFrame(ch)
                 outFloat[ch].addAll(frameOut.toList())
-                // Shift by hop
                 val buf = fftInputBuf[ch]
                 System.arraycopy(buf, HOP_SIZE, buf, 0, fftInputPos[ch] - HOP_SIZE)
                 fftInputPos[ch] -= HOP_SIZE
             }
         }
 
-        // Re-interleave (take minimum available across channels)
+        // Re-interleave
         val minFrames = outFloat.minOfOrNull { it.size } ?: 0
         for (f in 0 until minFrames) {
             for (ch in 0 until channelCount) {
@@ -151,7 +156,6 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
                 }
             }
         }
-        // Copy any remainder as-is
         for (i in minFrames * channelCount until totalSamples) {
             result[i] = samples[i]
         }
@@ -174,40 +178,37 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
         val bins = FFT_SIZE / 2 + 1
 
-        // Update noise profile from quiet frames (first 50 frames)
-        var energy = 0f
+        // --- Continuous minimum-statistics noise profile tracking ---
+        // Fast attack down (0.3), very slow release up (0.001).
+        // Converges to stationary noise floor even during continuous audio.
         for (i in 0 until bins) {
-            energy += real[i] * real[i] + imag[i] * imag[i]
-        }
-        val rms = sqrt(energy / bins)
-
-        if (rms < 0.01f && profiledFrames < 50) {
-            for (i in 0 until bins) {
-                val p = real[i] * real[i] + imag[i] * imag[i]
-                noiseProfile[ch][i] = 0.9f * noiseProfile[ch][i] + 0.1f * p
+            val power = real[i] * real[i] + imag[i] * imag[i]
+            val prof = noiseProfile[ch][i]
+            noiseProfile[ch][i] = if (power < prof) {
+                0.7f * prof + 0.3f * power
+            } else {
+                0.999f * prof + 0.001f * power
             }
-            profiledFrames++
         }
 
-        // Spectral gating: attenuate bins close to noise floor (12dB reduction)
-        val reduction = 12f // dB, like afftdn default
-        val linearReduction = 10f.pow(-reduction / 20f) // ~0.25
+        // --- Spectral gating: attenuate bins near/below noise floor ---
+        // 15dB max reduction, smooth transition to preserve voice/activity
+        val maxReductionDb = 15f
+        val minGain = 10f.pow(-maxReductionDb / 20f) // ~0.178
 
         for (i in 0 until bins) {
             val power = real[i] * real[i] + imag[i] * imag[i]
-            val noisePower = noiseProfile[ch][i]
-            val snr = if (noisePower > 1e-12f) power / noisePower else 100f
+            val noisePower = noiseProfile[ch][i].coerceAtLeast(1e-12f)
+            val snr = power / noisePower
 
-            // If SNR < 3dB (power < 2x noise), apply reduction
-            // Otherwise keep as-is (voice preservation)
-            val gain = if (snr < 2f) {
-                linearReduction
-            } else if (snr < 8f) {
-                // Smooth transition
-                val t = (snr - 2f) / 6f
-                linearReduction + t * (1f - linearReduction)
-            } else {
-                1f
+            val gain = when {
+                snr < 1.5f -> minGain                    // clearly noise
+                snr < 6f -> {                            // transition zone
+                    val t = (snr - 1.5f) / 4.5f
+                    val smooth = t * t * (3 - 2 * t)      // smoothstep
+                    minGain + smooth * (1f - minGain)
+                }
+                else -> 1f                               // clearly signal
             }
 
             real[i] *= gain
@@ -221,11 +222,10 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
         fft(real, imag, true)
 
-        // Overlap-add (CORRECT: no extra scaling, Hann COLA = 1.0 at 50% overlap)
+        // Overlap-add (Hann 50% overlap sums to 1.0, no extra scaling)
         val overlap = fftOverlap[ch]
         val out = FloatArray(HOP_SIZE)
         for (i in 0 until HOP_SIZE) {
-            // No synthesis window needed - Hann 50% overlap sums to 1.0
             out[i] = overlap[i] + real[i]
             overlap[i] = real[i + HOP_SIZE]
         }
@@ -290,11 +290,10 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         denoiser = null
         useRnnoise = false
         val bins = FFT_SIZE / 2 + 1
-        noiseProfile = Array(channelCount) { FloatArray(bins) { 1e-10f } }
+        noiseProfile = Array(channelCount) { FloatArray(bins) { 1e-8f } }
         fftOverlap = Array(channelCount) { FloatArray(FFT_SIZE / 2) }
         fftInputBuf = Array(channelCount) { FloatArray(FFT_SIZE * 2) }
         fftInputPos = IntArray(channelCount)
-        profiledFrames = 0
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
     }
