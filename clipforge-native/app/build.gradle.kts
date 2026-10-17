@@ -17,7 +17,7 @@ android {
         // RNNoise native library via CMake/NDK
         externalNativeBuild {
             cmake {
-                cppFlags += "-std=c99"
+                cFlags += "-std=c99"
             }
         }
         ndk {
