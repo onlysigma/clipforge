@@ -7,8 +7,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +34,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -48,12 +51,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -61,9 +69,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import coil.request.videoFrameMicros
 import java.io.File
 
 private val AppColors = darkColorScheme(
@@ -386,6 +391,26 @@ private fun ClipRow(
     onRemove: () -> Unit
 ) {
     val context = LocalContext.current
+    // Load video thumbnail via MediaMetadataRetriever (reliable, no Coil video decoder needed)
+    var thumbnail by remember(clip.uri) {
+        mutableStateOf<android.graphics.Bitmap?>(null)
+    }
+    LaunchedEffect(clip.uri) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(context, clip.uri)
+                val bmp = retriever.getFrameAtTime(
+                    1_000_000,
+                    android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
+                )
+                retriever.release()
+                thumbnail = bmp
+            } catch (_: Exception) {
+                thumbnail = null
+            }
+        }
+    }
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
         shape = RoundedCornerShape(12.dp),
@@ -395,19 +420,30 @@ private fun ClipRow(
             modifier = Modifier.padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(clip.uri)
-                    .videoFrameMicros(1_000_000)
-                    .crossfade(false)
-                    .build(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Black)
-            )
+            if (thumbnail != null) {
+                Image(
+                    bitmap = thumbnail!!.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(8.dp))
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color(0xFF2A2A2A)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.PlayArrow,
+                        contentDescription = null,
+                        tint = Color(0xFF666666),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -452,36 +488,67 @@ private fun shareFile(context: android.content.Context, file: File) {
 
 private fun downloadFile(context: android.content.Context, file: File) {
     try {
-        val contentValues = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, file.name)
-            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-            put(
-                android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
-                android.os.Environment.DIRECTORY_DOWNLOADS + "/ClipForge"
-            )
-        }
         val resolver = context.contentResolver
-        val uri = resolver.insert(
-            android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            contentValues
-        )
-        if (uri != null) {
-            resolver.openOutputStream(uri)?.use { out ->
-                file.inputStream().use { input ->
-                    input.copyTo(out)
+
+        // Try MediaStore first (Android 10+)
+        try {
+            val contentValues = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, file.name)
+                put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    put(
+                        android.provider.MediaStore.MediaColumns.RELATIVE_PATH,
+                        android.os.Environment.DIRECTORY_DOWNLOADS + "/ClipForge"
+                    )
+                    put(android.provider.MediaStore.MediaColumns.IS_PENDING, 1)
                 }
             }
-            android.widget.Toast.makeText(
-                context,
-                "Saved to Downloads/ClipForge",
-                android.widget.Toast.LENGTH_SHORT
-            ).show()
+            val collection = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                android.provider.MediaStore.Video.Media.getContentUri(
+                    android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY
+                )
+            } else {
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+            }
+            val uri = resolver.insert(collection, contentValues)
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { out ->
+                    file.inputStream().use { input -> input.copyTo(out) }
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    contentValues.clear()
+                    contentValues.put(android.provider.MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, contentValues, null, null)
+                }
+                android.widget.Toast.makeText(
+                    context, "Saved to Downloads/ClipForge", android.widget.Toast.LENGTH_SHORT
+                ).show()
+                return
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ClipForge", "MediaStore save failed, trying fallback", e)
         }
-    } catch (e: Exception) {
+
+        // Fallback: copy to app's external Downloads directory
+        val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+            android.os.Environment.DIRECTORY_DOWNLOADS
+        )
+        val destDir = java.io.File(downloadsDir, "ClipForge")
+        destDir.mkdirs()
+        val dest = java.io.File(destDir, file.name)
+        file.copyTo(dest, overwrite = true)
+
+        // Notify media scanner
+        android.media.MediaScannerConnection.scanFile(
+            context, arrayOf(dest.absolutePath), arrayOf("video/mp4"), null
+        )
         android.widget.Toast.makeText(
-            context,
-            "Save failed: ${e.message}",
-            android.widget.Toast.LENGTH_SHORT
+            context, "Saved to Downloads/ClipForge", android.widget.Toast.LENGTH_SHORT
+        ).show()
+    } catch (e: Exception) {
+        android.util.Log.e("ClipForge", "Save failed", e)
+        android.widget.Toast.makeText(
+            context, "Save failed: ${e.message}", android.widget.Toast.LENGTH_LONG
         ).show()
     }
 }
