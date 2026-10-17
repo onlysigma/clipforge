@@ -134,13 +134,21 @@ fun ClipForgeScreen(vm: ClipForgeViewModel) {
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(Modifier.width(7.dp))
-                Text(
-                    "ClipForge",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White,
-                    letterSpacing = (-0.3).sp
-                )
+                Column {
+                    Text(
+                        "ClipForge",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        letterSpacing = (-0.3).sp
+                    )
+                    Text(
+                        "Made by Hasnain",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = Color(0xFF666666)
+                    )
+                }
             }
             // Export button (shares last output if available)
             TextButton(
