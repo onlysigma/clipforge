@@ -3,22 +3,20 @@ package com.clipforge.app
 import androidx.media3.effect.RgbMatrix
 
 /**
- * CapCut-style "premium" grade applied on the GPU via Media3's [RgbMatrix].
+ * "Premium" filter for ClipForge Native.
  *
- * v2 grade: gentle saturation boost + warm color balance (like the old
- * FFmpeg `colorbalance` + `hue=s=1.28` chain) + subtle contrast lift.
- * The warm balance prevents the "pink" tint from pure saturation.
+ * v4: NEUTRAL edition — user feedback: "colors should stay as they are,
+ * only resolution should upscale." The old warm balance was causing a
+ * pink/magenta cast. This version does a very subtle polish with NO
+ * color shifting: tiny saturation lift + micro contrast, zero tint.
  *
  * The matrix is column-major, following [android.opengl.Matrix] conventions:
  * element (row, col) lives at index `col * 4 + row`.
  */
 class PremiumColorMatrix(
-    private val saturation: Float = 1.15f,
-    private val contrast: Float = 1.05f,
-    // Warm balance: slight red/yellow lift (CapCut-style)
-    private val warmRed: Float = 0.03f,
-    private val warmGreen: Float = 0.015f,
-    private val warmBlue: Float = -0.02f
+    private val saturation: Float = 1.08f,  // Very subtle (was 1.15)
+    private val contrast: Float = 1.02f     // Very subtle (was 1.05)
+    // NO warm balance — removed entirely to prevent pink tint
 ) : RgbMatrix {
 
     override fun getMatrix(presentationTimeUs: Long, useHdr: Boolean): FloatArray {
@@ -27,7 +25,7 @@ class PremiumColorMatrix(
         val g = 0.7152f * inv
         val b = 0.0722f * inv
 
-        // Column-major saturation matrix.
+        // Column-major saturation matrix (neutral, no color shift).
         val m = floatArrayOf(
             r + saturation, g, b, 0f, // column 0
             r, g + saturation, b, 0f, // column 1
@@ -35,19 +33,13 @@ class PremiumColorMatrix(
             0f, 0f, 0f, 1f            // column 3 (translation)
         )
 
-        // Fold contrast around the 0.5 pivot + warm color balance.
+        // Contrast around 0.5 pivot only — no tint added.
         val bias = 0.5f * (1f - contrast)
         for (row in 0..2) {
             for (col in 0..2) {
                 m[col * 4 + row] *= contrast
             }
-            // Translation: contrast bias + warm tint per channel
-            val warm = when (row) {
-                0 -> warmRed
-                1 -> warmGreen
-                else -> warmBlue
-            }
-            m[12 + row] = m[12 + row] * contrast + bias + warm
+            m[12 + row] = m[12 + row] * contrast + bias
         }
         return m
     }

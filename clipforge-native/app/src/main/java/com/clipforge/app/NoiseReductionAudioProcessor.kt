@@ -8,32 +8,27 @@ import java.nio.ByteOrder
 import kotlin.math.*
 
 /**
- * v3 spectral noise reduction for ClipForge Native.
+ * v4 spectral noise reduction — voice-preserving edition.
  *
- * FFT-based spectral subtraction (RNNoise-style approach, pure Kotlin):
- * 1. Overlapping Hann windows (2048 samples, 50% overlap)
- * 2. Noise spectrum estimated from quiet frames (adaptive)
- * 3. Spectral subtraction with over-subtraction + spectral floor
- * 4. Inverse FFT + overlap-add reconstruction
+ * Fixes v3's "voice removed" bug:
+ * - Wiener filtering instead of aggressive spectral subtraction (statistically optimal,
+ *   preserves speech much better)
+ * - Frequency-dependent processing: gentle in speech bands (300Hz-3.4kHz), stronger elsewhere
+ * - Conservative noise estimation (only very quiet frames update the noise profile)
+ * - Higher spectral floor (0.25) to prevent over-suppression
  *
- * This actually REMOVES noise from speech (not just gating silence),
- * like the old FFmpeg arnndn chain did.
- *
- * Only 16-bit PCM mono/stereo is handled.
+ * Only 16-bit PCM is handled.
  */
 class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
     private var channelCount: Int = 0
     private var sampleRate: Int = 44100
 
-    // Per-channel processing state
-    private var noiseSpectrum = Array(0) { FloatArray(0) }
+    private var noisePower = Array(0) { FloatArray(0) }
     private var overlapBuffer = Array(0) { FloatArray(0) }
     private var inputBuffer = Array(0) { FloatArray(0) }
     private var inputPos = IntArray(0)
-    private var noiseFrames = 0
 
-    // High-pass filter state (120 Hz rumble removal)
     private var hpX = FloatArray(0)
     private var hpY = FloatArray(0)
 
@@ -48,11 +43,10 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         sampleRate = inputAudioFormat.sampleRate
 
         val bins = FFT_SIZE / 2 + 1
-        noiseSpectrum = Array(channelCount) { FloatArray(bins) { 1e-6f } }
+        noisePower = Array(channelCount) { FloatArray(bins) { 1e-8f } }
         overlapBuffer = Array(channelCount) { FloatArray(FFT_SIZE / 2) }
         inputBuffer = Array(channelCount) { FloatArray(FFT_SIZE * 2) }
         inputPos = IntArray(channelCount)
-        noiseFrames = 0
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
         return inputAudioFormat
@@ -65,16 +59,12 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
         val totalSamples = bytes / 2
         val frames = totalSamples / channelCount
-
-        // Output: same number of samples (overlap-add preserves length after priming)
         val output = replaceOutputBuffer(bytes + HOP_SIZE * 2 * channelCount)
         output.order(ByteOrder.nativeOrder())
 
-        // High-pass coefficients
         val rc = 1f / (2f * PI.toFloat() * HIGH_PASS_HZ)
         val alpha = rc / (rc + 1f / sampleRate)
 
-        // De-interleave and high-pass into per-channel buffers
         for (f in 0 until frames) {
             for (ch in 0 until channelCount) {
                 val x = inputBuffer.short / 32768f
@@ -85,11 +75,9 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
             }
         }
 
-        // Process complete frames
         for (ch in 0 until channelCount) {
             while (inputPos[ch] >= FFT_SIZE) {
                 processFrame(ch, output)
-                // Shift by hop size
                 val buf = this.inputBuffer[ch]
                 System.arraycopy(buf, HOP_SIZE, buf, 0, inputPos[ch] - HOP_SIZE)
                 inputPos[ch] -= HOP_SIZE
@@ -103,79 +91,88 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
         val real = FloatArray(FFT_SIZE)
         val imag = FloatArray(FFT_SIZE)
 
-        // Apply Hann window
         for (i in 0 until FFT_SIZE) {
             val w = 0.5f * (1 - cos(2 * PI * i / FFT_SIZE)).toFloat()
             real[i] = buf[i] * w
         }
 
-        // Forward FFT
         fft(real, imag, false)
 
         val bins = FFT_SIZE / 2 + 1
-        val magnitudes = FloatArray(bins)
-        val phases = FloatArray(bins)
+        val binHz = sampleRate.toFloat() / FFT_SIZE
+
+        // Compute power spectrum
+        val power = FloatArray(bins)
         for (i in 0 until bins) {
-            magnitudes[i] = sqrt(real[i] * real[i] + imag[i] * imag[i])
-            phases[i] = atan2(imag[i], real[i])
+            power[i] = real[i] * real[i] + imag[i] * imag[i]
         }
 
-        // Estimate frame energy for noise detection
+        // Frame energy for VAD (voice activity detection)
         var energy = 0f
-        for (m in magnitudes) energy += m * m
+        for (p in power) energy += p
         val rms = sqrt(energy / bins)
 
-        // Update noise spectrum during quiet frames (adaptive)
-        if (rms < NOISE_THRESHOLD && noiseFrames < MAX_NOISE_FRAMES) {
-            val adapt = 0.1f // adaptation rate
+        // Update noise estimate ONLY on very quiet frames (conservative VAD)
+        if (rms < NOISE_THRESHOLD) {
             for (i in 0 until bins) {
-                noiseSpectrum[ch][i] = (1 - adapt) * noiseSpectrum[ch][i] + adapt * magnitudes[i]
+                noisePower[ch][i] = (1 - ADAPT_RATE) * noisePower[ch][i] + ADAPT_RATE * power[i]
             }
-            noiseFrames++
         }
 
-        // Spectral subtraction with over-subtraction and flooring
+        // Wiener filtering with frequency-dependent strength
         for (i in 0 until bins) {
-            val noise = noiseSpectrum[ch][i]
-            var clean = magnitudes[i] - OVER_SUBTRACTION * noise
-            // Spectral floor: don't go below 10% of original or noise floor
-            val floor = max(magnitudes[i] * SPECTRAL_FLOOR, noise * 0.1f)
-            if (clean < floor) clean = floor
+            val freq = i * binHz
+            val noisyPower = power[i]
+            val noiseP = noisePower[ch][i]
 
-            real[i] = clean * cos(phases[i])
-            imag[i] = clean * sin(phases[i])
-            // Mirror for real FFT
+            // Wiener gain: P_clean / (P_clean + P_noise)
+            // P_clean estimated as max(noisy - noise, 0)
+            val cleanEst = max(noisyPower - noiseP, 0f)
+            var gain = if (noisyPower > 1e-10f) {
+                cleanEst / (cleanEst + noiseP)
+            } else 0f
+
+            // Frequency-dependent: be GENTLE in speech band (300-3400 Hz)
+            val speechBandFactor = when {
+                freq in 300f..3400f -> 0.5f // Only 50% of Wiener effect in speech band
+                freq < 150f -> 1.0f // Full effect on rumble
+                else -> 0.8f // Moderate elsewhere
+            }
+            // Blend: gain = 1 - factor * (1 - wienerGain)
+            // factor=0 -> gain=1 (no change), factor=1 -> full Wiener
+            gain = 1f - speechBandFactor * (1f - gain)
+
+            // Apply spectral floor to prevent over-suppression
+            if (gain < SPECTRAL_FLOOR) gain = SPECTRAL_FLOOR
+
+            val mag = sqrt(noisyPower)
+            val newMag = mag * gain
+            val phase = atan2(imag[i], real[i])
+            real[i] = newMag * cos(phase)
+            imag[i] = newMag * sin(phase)
             if (i > 0 && i < FFT_SIZE / 2) {
                 real[FFT_SIZE - i] = real[i]
                 imag[FFT_SIZE - i] = -imag[i]
             }
         }
 
-        // Inverse FFT
         fft(real, imag, true)
 
-        // Overlap-add with Hann window (COLA compliant for 50% overlap)
+        // Overlap-add
         val overlap = overlapBuffer[ch]
         for (i in 0 until HOP_SIZE) {
             val w = 0.5f * (1 - cos(2 * PI * i / FFT_SIZE)).toFloat()
-            val sample = (overlap[i] + real[i] * w / (FFT_SIZE / 2))
-                .coerceIn(-1f, 1f)
+            val sample = (overlap[i] + real[i] * w / (FFT_SIZE / 4)).coerceIn(-1f, 1f)
             output.putShort((sample * 32767f).toInt().toShort())
         }
-        // Save second half for overlap
         for (i in 0 until HOP_SIZE) {
             val w = 0.5f * (1 - cos(2 * PI * (i + HOP_SIZE) / FFT_SIZE)).toFloat()
-            overlap[i] = real[i + HOP_SIZE] * w / (FFT_SIZE / 2)
+            overlap[i] = real[i + HOP_SIZE] * w / (FFT_SIZE / 4)
         }
     }
 
-    /**
-     * In-place radix-2 FFT.
-     */
     private fun fft(real: FloatArray, imag: FloatArray, inverse: Boolean) {
         val n = real.size
-
-        // Bit-reversal permutation
         var j = 0
         for (i in 1 until n) {
             var bit = n shr 1
@@ -190,7 +187,6 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
             }
         }
 
-        // Cooley-Tukey
         var len = 2
         while (len <= n) {
             val angle = 2 * PI / len * (if (inverse) 1 else -1)
@@ -229,22 +225,20 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
     override fun onFlush() {
         super.onFlush()
         val bins = FFT_SIZE / 2 + 1
-        noiseSpectrum = Array(channelCount) { FloatArray(bins) { 1e-6f } }
+        noisePower = Array(channelCount) { FloatArray(bins) { 1e-8f } }
         overlapBuffer = Array(channelCount) { FloatArray(FFT_SIZE / 2) }
         inputBuffer = Array(channelCount) { FloatArray(FFT_SIZE * 2) }
         inputPos = IntArray(channelCount)
-        noiseFrames = 0
         hpX = FloatArray(channelCount)
         hpY = FloatArray(channelCount)
     }
 
     companion object {
         private const val FFT_SIZE = 2048
-        private const val HOP_SIZE = 1024 // 50% overlap
+        private const val HOP_SIZE = 1024
         private const val HIGH_PASS_HZ = 120f
-        private const val NOISE_THRESHOLD = 0.015f // RMS below this = noise frame
-        private const val MAX_NOISE_FRAMES = 100 // Adapt for first ~2 seconds
-        private const val OVER_SUBTRACTION = 2.0f // Aggressive noise removal
-        private const val SPECTRAL_FLOOR = 0.1f // Keep 10% to avoid artifacts
+        private const val NOISE_THRESHOLD = 0.008f // Very conservative: only true silence
+        private const val ADAPT_RATE = 0.05f // Slow adaptation
+        private const val SPECTRAL_FLOOR = 0.25f // Never go below 25% — preserves voice
     }
 }
