@@ -28,10 +28,19 @@ Java_com_clipforge_app_RnnoiseNative_processFrame(
     jfloatArray inArray, jfloatArray outArray) {
 
     DenoiseState *st = (DenoiseState *)(intptr_t)handle;
-    if (!st) return 0.0f;
+    if (!st || !inArray || !outArray) return 0.0f;
+
+    jsize inLen = (*env)->GetArrayLength(env, inArray);
+    jsize outLen = (*env)->GetArrayLength(env, outArray);
+    if (inLen < FRAME_SIZE || outLen < FRAME_SIZE) return 0.0f;
 
     jfloat *in = (*env)->GetFloatArrayElements(env, inArray, NULL);
     jfloat *out = (*env)->GetFloatArrayElements(env, outArray, NULL);
+    if (!in || !out) {
+        if (in) (*env)->ReleaseFloatArrayElements(env, inArray, in, JNI_ABORT);
+        if (out) (*env)->ReleaseFloatArrayElements(env, outArray, out, JNI_ABORT);
+        return 0.0f;
+    }
 
     float vad = rnnoise_process_frame(st, out, in);
 
