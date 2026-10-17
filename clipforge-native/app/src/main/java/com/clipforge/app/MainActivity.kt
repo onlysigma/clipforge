@@ -9,6 +9,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,21 +22,25 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Hearing
+import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -62,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -74,13 +80,13 @@ import java.io.File
 private val AppColors = darkColorScheme(
     primary = Color.White,
     onPrimary = Color.Black,
-    background = Color.Black,
+    background = Color(0xFF0C0C0C),
     onBackground = Color.White,
-    surface = Color(0xFF111111),
+    surface = Color(0xFF121212),
     onSurface = Color.White,
-    surfaceVariant = Color(0xFF1E1E1E),
-    onSurfaceVariant = Color(0xFFB0B0B0),
-    outline = Color(0xFF3A3A3A)
+    surfaceVariant = Color(0xFF1A1A1A),
+    onSurfaceVariant = Color(0xFF999999),
+    outline = Color(0xFF2A2A2A)
 )
 
 class MainActivity : ComponentActivity() {
@@ -109,252 +115,473 @@ fun ClipForgeScreen(vm: ClipForgeViewModel) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black)
+            .background(Color(0xFF0C0C0C))
             .navigationBarsPadding()
-            .padding(16.dp)
     ) {
+        // ---- App bar ----
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Filled.Movie,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(Modifier.width(7.dp))
+                Text(
+                    "ClipForge",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    letterSpacing = (-0.3).sp
+                )
+            }
+            // Export button (shares last output if available)
+            TextButton(
+                onClick = {
+                    ui.outputFile?.let { shareFile(context, it) }
+                },
+                enabled = ui.outputFile != null,
+                colors = ButtonDefaults.textButtonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black,
+                    disabledContainerColor = Color(0xFF2A2A2A),
+                    disabledContentColor = Color(0xFF666666)
+                ),
+                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.height(34.dp)
+            ) {
+                Icon(
+                    Icons.Filled.IosShare,
+                    contentDescription = null,
+                    modifier = Modifier.size(15.dp)
+                )
+                Spacer(Modifier.width(4.dp))
+                Text("Export", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+
         // ---- Scrollable content ----
         Column(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(rememberScrollState())
         ) {
-        // ---- Header ----
-        Text("ClipForge", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text(
-            "Native • GPU encoding",
-            fontSize = 13.sp,
-            color = Color(0xFFB0B0B0)
-        )
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Clip list ----
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "Clips (${ui.clips.size})",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color.White,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedButton(
-                onClick = { picker.launch("video/*") },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+            // ---- Preview hero ----
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .height(172.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF141414)),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Add clips")
+                // Show first clip thumbnail as preview if available
+                val firstClip = ui.clips.firstOrNull()
+                if (firstClip != null) {
+                    ClipThumbnail(
+                        uri = firstClip.uri,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.35f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(28.dp))
+                                .background(Color.White.copy(alpha = 0.92f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Filled.PlayArrow,
+                                contentDescription = "Preview",
+                                tint = Color.Black,
+                                modifier = Modifier.size(30.dp)
+                            )
+                        }
+                    }
+                } else {
+                    Icon(
+                        Icons.Filled.Movie,
+                        contentDescription = null,
+                        tint = Color(0xFF333333),
+                        modifier = Modifier.size(44.dp)
+                    )
+                }
+                // Duration badge
+                if (ui.clips.isNotEmpty()) {
+                    val totalMs = ui.clips.sumOf { it.durationMs }
+                    Text(
+                        formatDuration(totalMs),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.6f))
+                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                    )
+                    Text(
+                        "Preview",
+                        fontSize = 10.sp,
+                        color = Color(0xFF999999),
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.55f))
+                            .padding(horizontal = 9.dp, vertical = 3.dp)
+                    )
+                }
             }
-        }
-        Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(4.dp))
 
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f, fill = false)
-                .height(260.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(ui.clips, key = { it.id }) { clip ->
-                ClipRow(
-                    clip = clip,
-                    onUp = { vm.moveClip(clip.id, -1) },
-                    onDown = { vm.moveClip(clip.id, 1) },
-                    onRemove = { vm.removeClip(clip.id) }
+            // ---- Timeline header ----
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "TIMELINE",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF777777),
+                    letterSpacing = 1.2.sp
+                )
+                TextButton(
+                    onClick = { picker.launch("video/*") },
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = Color(0xFF1A1A1A),
+                        contentColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.height(30.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(15.dp)
+                    )
+                    Spacer(Modifier.width(3.dp))
+                    Text("Add", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            // ---- Horizontal timeline ----
+            if (ui.clips.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                        horizontal = 16.dp
+                    )
+                ) {
+                    items(ui.clips, key = { it.id }) { clip ->
+                        TimelineThumb(
+                            clip = clip,
+                            index = ui.clips.indexOf(clip),
+                            selected = false,
+                            onRemove = { vm.removeClip(clip.id) }
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    "No clips yet — tap Add to pick videos",
+                    color = Color(0xFF666666),
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
-        }
-        if (ui.clips.isEmpty()) {
-            Text(
-                "No clips yet — tap “Add clips” to pick videos.",
-                color = Color(0xFFB0B0B0),
-                fontSize = 13.sp,
-                modifier = Modifier.padding(vertical = 4.dp)
-            )
-        }
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Format ----
-        SectionLabel("Format")
-        SegmentedRow(
-            options = AspectRatio.values().map { it.label },
-            selected = ui.aspectRatio.label,
-            onSelect = { label ->
-                vm.setAspectRatio(AspectRatio.values().first { it.label == label })
-            }
-        )
-        Spacer(Modifier.height(8.dp))
-        SectionLabel("Resolution")
-        SegmentedRow(
-            options = Resolution.values().map { it.label },
-            selected = ui.resolution.label,
-            onSelect = { label ->
-                vm.setResolution(Resolution.values().first { it.label == label })
-            }
-        )
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Toggles ----
-        ToggleRow(
-            title = "Noise cancellation",
-            subtitle = "High-pass + noise gate on voices",
-            checked = ui.noiseReduction,
-            onChange = vm::setNoiseReduction
-        )
-        ToggleRow(
-            title = "Premium filter",
-            subtitle = "Contrast, colour and saturation grade",
-            checked = ui.premiumFilter,
-            onChange = vm::setPremiumFilter
-        )
-        Spacer(Modifier.height(12.dp))
-
-        // ---- Error card (real error, not generic) ----
-        ui.error?.let { err ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1212)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
-                    Text(
-                        err,
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(onClick = vm::clearError, modifier = Modifier.size(24.dp)) {
-                        Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = Color.White)
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-        }
-
-        // ---- Output card ----
-        ui.outputFile?.let { file ->
-            Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF122A12)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White)
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        file.name,
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = { downloadFile(context, file) }) {
-                        Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Save", color = Color.White)
-                    }
-                    TextButton(onClick = { shareFile(context, file) }) {
-                        Icon(Icons.Filled.Share, contentDescription = null, tint = Color.White)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Share", color = Color.White)
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-        }
-
-        // ---- Progress ----
-        if (ui.isBuilding) {
-            Text("Building… ${ui.progress}%", color = Color.White, fontSize = 14.sp)
             Spacer(Modifier.height(4.dp))
-            LinearProgressIndicator(
-                progress = ui.progress / 100f,
-                modifier = Modifier.fillMaxWidth(),
-                color = Color.White,
-                trackColor = Color(0xFF3A3A3A)
-            )
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = vm::cancelBuild,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
-            ) { Text("Cancel") }
+
+            // ---- Tool icons row ----
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF121212))
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly
+            ) {
+                ToolIcon(
+                    icon = Icons.Filled.AspectRatio,
+                    label = "Ratio",
+                    active = false,
+                    onClick = { /* scroll to ratio */ }
+                )
+                ToolIcon(
+                    icon = Icons.Filled.HighQuality,
+                    label = "Quality",
+                    active = false,
+                    onClick = { /* scroll to resolution */ }
+                )
+                ToolIcon(
+                    icon = Icons.Filled.Hearing,
+                    label = "Denoise",
+                    active = ui.noiseReduction,
+                    onClick = { vm.setNoiseReduction(!ui.noiseReduction) }
+                )
+                ToolIcon(
+                    icon = Icons.Filled.Tune,
+                    label = "Filter",
+                    active = ui.premiumFilter,
+                    onClick = { vm.setPremiumFilter(!ui.premiumFilter) }
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+
+            // ---- Settings ----
+            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                SettingRow(label = "Aspect ratio") {
+                    SegmentedMini(
+                        options = AspectRatio.values().map { it.label },
+                        selected = ui.aspectRatio.label,
+                        onSelect = { label ->
+                            vm.setAspectRatio(AspectRatio.values().first { it.label == label })
+                        }
+                    )
+                }
+                SettingRow(label = "Resolution") {
+                    SegmentedMini(
+                        options = Resolution.values().map { it.label },
+                        selected = ui.resolution.label,
+                        onSelect = { label ->
+                            vm.setResolution(Resolution.values().first { it.label == label })
+                        }
+                    )
+                }
+                // Toggles (AUTO-ON by default)
+                ToggleRowMini(
+                    title = "Noise cancellation",
+                    subtitle = "RNNoise AI + FFT denoiser",
+                    checked = ui.noiseReduction,
+                    onChange = vm::setNoiseReduction
+                )
+                ToggleRowMini(
+                    title = "Premium filter",
+                    subtitle = "Contrast & saturation grade",
+                    checked = ui.premiumFilter,
+                    onChange = vm::setPremiumFilter
+                )
+            }
+
+            // ---- Error card ----
+            ui.error?.let { err ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1212)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            err,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = vm::clearError, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = Color.White)
+                        }
+                    }
+                }
+            }
+
+            // ---- Output card ----
+            ui.outputFile?.let { file ->
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF122A12)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Filled.Check, contentDescription = null, tint = Color(0xFF7FD67F))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            file.name,
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = { downloadFile(context, file) }) {
+                            Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Save", color = Color.White, fontSize = 12.sp)
+                        }
+                        TextButton(onClick = { shareFile(context, file) }) {
+                            Icon(Icons.Filled.Share, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Share", color = Color.White, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            // ---- Progress ----
+            if (ui.isBuilding) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+                    Text(
+                        "Building… ${ui.progress}%",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = ui.progress / 100f,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(3.dp)),
+                        color = Color.White,
+                        trackColor = Color(0xFF2A2A2A)
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = vm::cancelBuild,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                    ) { Text("Cancel", fontSize = 13.sp) }
+                }
+            }
             Spacer(Modifier.height(8.dp))
         }
-        } // end scrollable content
-
-        Spacer(Modifier.height(8.dp))
 
         // ---- Build button (fixed at bottom) ----
-        Button(
-            onClick = vm::build,
-            enabled = ui.clips.isNotEmpty() && !ui.isBuilding,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = Color.White,
-                contentColor = Color.Black,
-                disabledContainerColor = Color(0xFF3A3A3A),
-                disabledContentColor = Color(0xFF888888)
-            ),
-            shape = RoundedCornerShape(14.dp)
-        ) {
-            Text("Build Final Video", fontSize = 17.sp, fontWeight = FontWeight.Bold)
+        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Button(
+                onClick = vm::build,
+                enabled = ui.clips.isNotEmpty() && !ui.isBuilding,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.White,
+                    contentColor = Color.Black,
+                    disabledContainerColor = Color(0xFF2A2A2A),
+                    disabledContentColor = Color(0xFF666666)
+                ),
+                shape = RoundedCornerShape(15.dp)
+            ) {
+                Icon(
+                    Icons.Filled.Bolt,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(Modifier.width(7.dp))
+                Text("BUILD VIDEO", fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+            }
         }
     }
 }
 
 @Composable
-private fun SectionLabel(text: String) {
-    Text(
-        text.uppercase(),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        color = Color(0xFFB0B0B0),
-        modifier = Modifier.padding(bottom = 6.dp)
-    )
+private fun ToolIcon(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (active) Color.White else Color(0xFF1D1D1D)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                icon,
+                contentDescription = label,
+                tint = if (active) Color.Black else Color(0xFFCCCCCC),
+                modifier = Modifier.size(19.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(label, fontSize = 9.sp, color = Color(0xFF777777), fontWeight = FontWeight.Medium)
+    }
 }
 
 @Composable
-private fun SegmentedRow(
+private fun SettingRow(
+    label: String,
+    content: @Composable () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+        content()
+    }
+}
+
+@Composable
+private fun SegmentedMini(
     options: List<String>,
     selected: String,
     onSelect: (String) -> Unit
 ) {
     Row(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF1E1E1E))
-            .padding(4.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF171717))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(1.dp)
     ) {
         options.forEach { opt ->
             val isSel = opt == selected
-            TextButton(
-                onClick = { onSelect(opt) },
+            Text(
+                opt,
+                fontSize = 10.5.sp,
+                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                color = if (isSel) Color.Black else Color(0xFF777777),
                 modifier = Modifier
-                    .weight(1f)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(if (isSel) Color.White else Color.Transparent),
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = if (isSel) Color.Black else Color.White
-                )
-            ) {
-                Text(opt, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal)
-            }
+                    .background(if (isSel) Color.White else Color.Transparent)
+                    .clickable { onSelect(opt) }
+                    .padding(horizontal = 11.dp, vertical = 6.dp)
+            )
         }
     }
 }
 
 @Composable
-private fun ToggleRow(
+private fun ToggleRowMini(
     title: String,
     subtitle: String,
     checked: Boolean,
@@ -363,43 +590,104 @@ private fun ToggleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-            Text(subtitle, color = Color(0xFFB0B0B0), fontSize = 12.sp)
+            Text(title, color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = Color(0xFF666666), fontSize = 10.sp)
         }
         Switch(
             checked = checked,
             onCheckedChange = onChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF555555),
-                uncheckedThumbColor = Color(0xFF888888),
-                uncheckedTrackColor = Color(0xFF2A2A2A)
-            )
+                checkedThumbColor = Color.Black,
+                checkedTrackColor = Color.White,
+                uncheckedThumbColor = Color(0xFF777777),
+                uncheckedTrackColor = Color(0xFF2C2C2C)
+            ),
+            modifier = Modifier.size(width = 42.dp, height = 24.dp)
         )
     }
 }
 
 @Composable
-private fun ClipRow(
+private fun TimelineThumb(
     clip: ClipItem,
-    onUp: () -> Unit,
-    onDown: () -> Unit,
+    index: Int,
+    selected: Boolean,
     onRemove: () -> Unit
 ) {
+    Box(
+        modifier = Modifier
+            .size(width = 88.dp, height = 64.dp)
+            .clip(RoundedCornerShape(11.dp))
+            .background(Color(0xFF181818))
+    ) {
+        ClipThumbnail(
+            uri = clip.uri,
+            modifier = Modifier.fillMaxSize()
+        )
+        // Number badge
+        Text(
+            "${index + 1}",
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(5.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(Color.Black.copy(alpha = 0.65f))
+                .padding(horizontal = 7.dp, vertical = 1.dp)
+        )
+        // Duration badge
+        Text(
+            formatDuration(clip.durationMs),
+            fontSize = 9.sp,
+            color = Color(0xFFAAAAAA),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(5.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color.Black.copy(alpha = 0.65f))
+                .padding(horizontal = 6.dp, vertical = 1.dp)
+        )
+        // Remove button
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(4.dp)
+                .size(20.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color.Black.copy(alpha = 0.6f))
+                .clickable(onClick = onRemove),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = "Remove",
+                tint = Color.White,
+                modifier = Modifier.size(12.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun ClipThumbnail(
+    uri: android.net.Uri,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
-    // Load video thumbnail via MediaMetadataRetriever (reliable, no Coil video decoder needed)
-    var thumbnail by remember(clip.uri) {
+    var thumbnail by remember(uri) {
         mutableStateOf<android.graphics.Bitmap?>(null)
     }
-    LaunchedEffect(clip.uri) {
+    LaunchedEffect(uri) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val retriever = android.media.MediaMetadataRetriever()
-                retriever.setDataSource(context, clip.uri)
+                retriever.setDataSource(context, uri)
                 val bmp = retriever.getFrameAtTime(
                     1_000_000,
                     android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC
@@ -411,64 +699,24 @@ private fun ClipRow(
             }
         }
     }
-    Card(
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E)),
-        shape = RoundedCornerShape(12.dp),
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier.padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+    if (thumbnail != null) {
+        Image(
+            bitmap = thumbnail!!.asImageBitmap(),
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = modifier
+        )
+    } else {
+        Box(
+            modifier = modifier.background(Color(0xFF1A1A1A)),
+            contentAlignment = Alignment.Center
         ) {
-            if (thumbnail != null) {
-                Image(
-                    bitmap = thumbnail!!.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(64.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF2A2A2A)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.PlayArrow,
-                        contentDescription = null,
-                        tint = Color(0xFF666666),
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    clip.displayName,
-                    color = Color.White,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    formatDuration(clip.durationMs),
-                    color = Color(0xFFB0B0B0),
-                    fontSize = 12.sp
-                )
-            }
-            IconButton(onClick = onUp, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up", tint = Color.White)
-            }
-            IconButton(onClick = onDown, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down", tint = Color.White)
-            }
-            IconButton(onClick = onRemove, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Filled.Delete, contentDescription = "Remove", tint = Color.White)
-            }
+            Icon(
+                Icons.Filled.PlayArrow,
+                contentDescription = null,
+                tint = Color(0xFF444444),
+                modifier = Modifier.size(24.dp)
+            )
         }
     }
 }
