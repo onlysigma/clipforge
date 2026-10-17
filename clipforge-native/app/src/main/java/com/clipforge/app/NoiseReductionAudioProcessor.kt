@@ -220,8 +220,8 @@ class NoiseReductionAudioProcessor : BaseAudioProcessor() {
 
         if (inverse) {
             for (i in 0 until n) {
-                real[i] /= n
-                imag[i] /= n
+                real[i] = real[i] / n
+                imag[i] = imag[i] / n
             }
         }
     }

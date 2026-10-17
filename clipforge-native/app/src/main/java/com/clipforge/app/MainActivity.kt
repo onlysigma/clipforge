@@ -428,6 +428,7 @@ private fun ClipRow(
                     modifier = Modifier
                         .size(64.dp)
                         .clip(RoundedCornerShape(8.dp))
+                )
             } else {
                 Box(
                     modifier = Modifier
